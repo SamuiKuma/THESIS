@@ -52,18 +52,29 @@ def levels_page(page: ft.Page):
     level_rows = []
     row = []
 
-    updated = get_updated_data(page)
-    incorrect_answers = updated["incorrect_answers"]
-    correct_answers = updated["correct_answers"]
-    if updated and updated["questions"]:
-        # Get any question to extract identifying info (safe if list isn't empty)
-        first_question = updated["questions"][0]
+    # --- Reset all levels to not completed ---
+    for level in selected_module_levels:
+        level.completed = False
 
-        for level in selected_module_levels:
-            if level.lesson_id == first_question.lesson_id and level.module_name == first_question.module_name:
-                level.questions_answers = updated["questions"]
-                level.completed = updated["grade"] >= 50
-                break
+    updated = page.session.get("updated_data")
+    if updated is not None:
+        incorrect_answers = updated["incorrect_answers"]
+        correct_answers = updated["correct_answers"]
+        if updated and updated["questions"]:
+            # Get any question to extract identifying info (safe if list isn't empty)
+            first_question = updated["questions"][0]
+
+            for level in selected_module_levels:
+                if level.lesson_id == first_question.lesson_id and level.module_name == first_question.module_name:
+                    level.questions_answers = updated["questions"]
+                    # Only set completed if grade is sufficient and this is the just-finished level
+                    if updated["grade"] >= 50:
+                        level.completed = True
+                    else:
+                        level.completed = False
+                    break
+    else:
+        incorrect_answers = {}
 
     def go_back(e):
         """Navigate back to the main menu"""

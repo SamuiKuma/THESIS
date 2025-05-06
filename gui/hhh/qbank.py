@@ -1,50 +1,14 @@
 module_1 = {
     "Lesson 1": [
         {
-            "id": 1,
-            "type": "Lesson",
-            "question": "The phrase 'Maupay nga aga' means 'Good morning'.",
-            "answer": None,
-            "vocabulary": "Maupay nga aga",
-            "difficulty": None,
-            "response_time": None
-        },
-        {
-            "id": 2,
-            "type": "Image Picker",
-            "question": "Which image represents 'aga'?",
-            "choices": ["assets/morning.jpg", "assets/night.jpg"],
-            "correct_answer": "assets/morning.jpg",
-            "vocabulary": "Maupay nga aga",
-            "difficulty": 1,
-            "response_time": 0
-        },
-        {
-            "id": 3,
-            "type": "Word Select / Translate",
-            "question": "Translate: 'Good morning, Alyssa!'",
-            "choices": ["Maupay nga gab-i, Alyssa!", "Maupay nga aga, Alyssa!", "Maupay nga kulop, Alyssa!"],
-            "correct_answer": "Maupay nga aga, Alyssa!",
-            "vocabulary": "Maupay nga aga",
-            "difficulty": 2,
-            "response_time": 0
-        },
-        {
-            "id": 4,
-            "type": "Cultural Trivia",
-            "question": "Did you know? Waray is similar to Bisaya …",
-            "answer": None,
-            "vocabulary": None,
-            "difficulty": None,
-            "response_time": None
-        },
-        {
             "id": 5,
-            "type": "Lesson",
-            "question": "The phrase 'Maupay nga aga gihapon' means 'Good morning too'.",
-            "answer": None,
-            "vocabulary": "gihapon",
-            "difficulty": None,
+            "type": "Pronounce",
+            "question": "How do you pronounce 'maupay'?",
+            "audio_file": "maupay.mp3",
+            "accuracy": None,
+            "accuracy_threshold": 0.8,
+            "vocabulary": "maupay",
+            "difficulty": 1,
             "response_time": None
         }
     ],
