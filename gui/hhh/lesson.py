@@ -294,6 +294,9 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
             if predicted_word:
                 txt_transcription.value = f"You said: {predicted_word}"
                 
+                # Get any pronunciation errors from the NLTK analysis that was performed
+                nltk_errors = getattr(speech_processor, 'pronunciation_errors', [])
+                
                 if predicted_word.lower() == vocabulary.lower():
                     accuracy = confidence if confidence else 0.75
                     txt_accuracy.value = f"Accuracy: {accuracy:.0%}"
@@ -309,6 +312,11 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
                             if problem_phonemes:
                                 feedback_text = "Work on: "
                                 feedback_text += ", ".join([f"{p} ({s:.0%})" for p, s in problem_phonemes])
+                                
+                                # Add NLTK analysis if available
+                                if nltk_errors:
+                                    feedback_text += "\n\nGoogle analysis: " + "\n• ".join([""] + nltk_errors)
+                                    
                                 pronunciation_tips.value = feedback_text
                                 pronunciation_tips.visible = True
                             else:
@@ -330,20 +338,32 @@ def build_pronounce_question(question_data, progress_value, on_next, on_back):
                                 speech_processor._map_phonemes_to_syllables(vocabulary.lower())
                             )
                             
+                            feedback_text = ""
                             if problem_syllables:
                                 feedback_text = f"Focus on syllables: {', '.join(problem_syllables)}"
-                                pronunciation_tips.value = feedback_text
-                                pronunciation_tips.visible = True
-                            else:
-                                pronunciation_tips.visible = False
+                            
+                            # Add NLTK analysis if available
+                            if nltk_errors:
+                                if feedback_text:
+                                    feedback_text += "\n\nGoogle analysis: " + "\n• ".join([""] + nltk_errors)
+                                else:
+                                    feedback_text = "Google analysis: " + "\n• ".join([""] + nltk_errors)
+                            
+                            pronunciation_tips.value = feedback_text
+                            pronunciation_tips.visible = bool(feedback_text)
                 else:
                     txt_transcription.value = f"You said: {predicted_word}. Try saying '{vocabulary}'"
                     txt_accuracy.value = f"Incorrect word detected"
                     txt_accuracy.color = "red"
                     question_data.accuracy = 0.0
                     
-                    # Show general pronunciation tips
-                    pronunciation_tips.value = "Try again, focusing on clear pronunciation"
+                    # Show general pronunciation tips with NLTK analysis
+                    feedback_text = "Try again, focusing on clear pronunciation"
+                    
+                    if nltk_errors:
+                        feedback_text += "\n\nPronunciation analysis: " + "\n• ".join([""] + nltk_errors)
+                    
+                    pronunciation_tips.value = feedback_text
                     pronunciation_tips.visible = True
                     pronunciation_chart.visible = False
             else:

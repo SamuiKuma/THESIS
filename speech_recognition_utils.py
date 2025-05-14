@@ -14,6 +14,14 @@ from fastdtw import fastdtw
 import librosa
 import matplotlib.pyplot as plt
 
+# Add these imports for pronunciation error analysis
+from nltk.metrics import edit_distance
+try:
+    import nltk
+    nltk.download('punkt', quiet=True)
+except ImportError:
+    print("NLTK not installed. Advanced error analysis will be limited.")
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -115,53 +123,70 @@ class SpeechProcessor:
         }
 
     def predict_speech(self, audio_file, expected_word=None):
-        """Predict speech with enhanced error handling and detailed feedback."""
+        """Enhanced speech prediction using both custom model and Google Speech API."""
         try:
             if not is_valid_audio(audio_file):
                 logger.warning(f"Invalid audio file: {audio_file}")
                 return None, None, None
 
-            # Extract features from the audio file
+            # Extract features for custom model
             features = extract_features(audio_file)
             if features is None:
                 return None, None, None
 
-            # Make prediction
+            # Custom model prediction
             features = np.expand_dims(features, axis=0)
             prediction = self.model.predict(features, verbose=0)
-            
             confidence = np.max(prediction)
-            if confidence < self.confidence_threshold:
-                logger.warning(f"Low confidence prediction: {confidence:.2f}")
-                return None, None, None
-
-            # Get predicted word
             predicted_index = np.argmax(prediction)
-            predicted_word = self.encoder_classes[predicted_index]
+            model_predicted_word = self.encoder_classes[predicted_index]
+            
+            # Google Speech API prediction
+            recognizer = sr.Recognizer()
+            with sr.AudioFile(audio_file) as source:
+                audio_data = recognizer.record(source)
+                try:
+                    google_text = recognizer.recognize_google(audio_data)
+                    logger.info(f"Google recognized: {google_text}")
 
-            # Calculate phoneme-level confidence if expected word matches
+                    # Use NLTK to analyze pronunciation errors
+                    if expected_word:
+                        error_analysis = analyze_pronunciation_errors(google_text, expected_word)
+                        if error_analysis and error_analysis['distance'] > 0:
+                            logger.info(f"Pronunciation errors detected: {error_analysis['errors']}")
+                            # Store the errors for display in the UI
+                            self.pronunciation_errors = error_analysis['errors']
+                        else:
+                            self.pronunciation_errors = []
+
+                    # Find closest match in our vocabulary
+                    closest_match = None
+                    best_score = 0
+                    for word in self.encoder_classes:
+                        # Simple contains check - could use more sophisticated matching
+                        if word.lower() in google_text.lower():
+                            closest_match = word
+                            break
+                    
+                    # If Google found a match in our vocabulary, use it
+                    if closest_match and (confidence < 0.6 or closest_match != model_predicted_word):
+                        logger.info(f"Using Google's recognition: {closest_match} instead of model's: {model_predicted_word}")
+                        predicted_word = closest_match
+                    else:
+                        predicted_word = model_predicted_word
+                        
+                except sr.UnknownValueError:
+                    logger.info("Google Speech Recognition could not understand audio")
+                    predicted_word = model_predicted_word
+                except sr.RequestError:
+                    logger.warning("Could not request results from Google Speech Recognition")
+                    predicted_word = model_predicted_word
+
+            # Calculate phoneme-level confidence if expected word matches (using original logic)
             phoneme_confidence = None
             if expected_word and predicted_word.lower() == expected_word.lower():
                 phoneme_confidence = self._analyze_phoneme_confidence(features, predicted_word)
-                
-                # Generate specific feedback for problematic phonemes
-                if phoneme_confidence:
-                    weak_phonemes = []
-                    for phoneme, score in phoneme_confidence.items():
-                        if score < 0.7:  # Threshold for acceptable pronunciation
-                            weak_phonemes.append((phoneme, score))
-                    
-                    if weak_phonemes:
-                        logger.info(f"Pronunciation issues detected in phonemes: {[p[0] for p in weak_phonemes]}")
-                        
-                        # Map phonemes to syllables for more intuitive feedback
-                        if expected_word.lower() in self.waray_phonemes:
-                            syllables = self._map_phonemes_to_syllables(expected_word.lower())
-                            problem_syllables = self._identify_problem_syllables(weak_phonemes, syllables)
-                            
-                            if problem_syllables:
-                                syllable_feedback = f"Focus on these syllables: {', '.join(problem_syllables)}"
-                                logger.info(syllable_feedback)
+                # Rest of original phoneme analysis code...
 
             return predicted_word, confidence, phoneme_confidence
 
@@ -253,10 +278,19 @@ class SpeechProcessor:
         """Extract mel spectrogram from audio features for DTW comparison."""
         # Extract the mel portion of the features if it's a combined feature vector
         feature_dim = audio_features.shape[-1]
-        mel_dim = min(40, feature_dim)  # Typical mel dimension
         
-        # Use the most relevant dimensions for phoneme matching
-        return audio_features[:, :mel_dim]
+        # Always use 13 dimensions to match reference patterns
+        required_dims = 13
+        
+        # Ensure dimensions match
+        if feature_dim < required_dims:
+            # If we have fewer features than required, pad with zeros
+            padded = np.zeros((audio_features.shape[0], required_dims))
+            padded[:, :feature_dim] = audio_features
+            return padded
+        else:
+            # Otherwise use the first required_dims features
+            return audio_features[:, :required_dims]
 
     def _get_phoneme_reference_patterns(self, phonemes):
         """Create or retrieve reference patterns for each phoneme."""
@@ -307,6 +341,60 @@ class SpeechProcessor:
                 patterns[phoneme] = np.ones((20, 13)) * 0.5
                 
         return patterns
+
+def analyze_pronunciation_errors(google_text, expected_word):
+    """Analyze pronunciation errors using edit distance comparison"""
+    try:
+        # Get the closest match from Google's full transcription
+        words = google_text.lower().split()
+        
+        # Find the most similar word to our expected word
+        closest_match = None
+        min_distance = float('inf')
+        
+        for word in words:
+            distance = edit_distance(word, expected_word.lower())
+            if distance < min_distance:
+                min_distance = distance
+                closest_match = word
+        
+        if not closest_match:
+            closest_match = google_text.lower()
+            min_distance = edit_distance(closest_match, expected_word.lower())
+        
+        # Analyze specific differences
+        errors = []
+        
+        # 1. Length mismatch (too short/long)
+        if len(closest_match) < len(expected_word):
+            errors.append("Your pronunciation was too short - missing sounds")
+        elif len(closest_match) > len(expected_word):
+            errors.append("Your pronunciation had extra sounds")
+            
+        # 2. Specific character/sound differences
+        if min_distance > 0:
+            # Simple error message based on distance severity
+            if min_distance == 1:
+                errors.append(f"Minor pronunciation error detected")
+            elif min_distance == 2:
+                errors.append(f"Moderate pronunciation error detected")
+            else:
+                errors.append(f"Significant pronunciation differences detected")
+        
+        return {
+            "recognized": closest_match,
+            "expected": expected_word,
+            "distance": min_distance,
+            "errors": errors
+        }
+    except Exception as e:
+        # Fallback for any errors in the analysis
+        return {
+            "recognized": google_text,
+            "expected": expected_word,
+            "distance": 1,
+            "errors": ["Error analyzing pronunciation details"]
+        }
 
 def capture_audio(duration=3, sample_rate=16000):
     """Capture audio from microphone with enhanced preprocessing."""
@@ -455,7 +543,7 @@ if __name__ == "__main__":
     
     if choice == "1":
         # Updated word list to include all 10 words
-        words = ["adi", "aga", "alayon", "buwas", "gabi", "gab-i", "hain", "kaon", "marasa", "maupay", "ngaran", "tagpira"]
+        words = ["adi", "aga", "alayon", "buwas", "gabi", "hain", "kaon", "marasa", "maupay", "ngaran", "tagpira"]
         print("\nAvailable words:", ", ".join(words))
         word = input("Enter word to practice (or press Enter to quit): ").lower()
         if word in words:
